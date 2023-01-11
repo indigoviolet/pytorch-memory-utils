@@ -1,0 +1,33 @@
+[project]
+name = "pytorch-memory-utils"
+description = "PyTorch Memory Utilities, taken from https://github.com/Oldpan/Pytorch-Memory-Utils"
+authors = [
+        {name = "Venky Iyer", email = "indigoviolet@gmail.com"}
+        ]
+requires-python = ">=3.9"
+license = "MIT"
+dynamic = ["version"]
+readme = "README.md"
+keywords = [
+    "science",
+]
+classifiers = [
+            'Intended Audience :: Science/Research',
+            ]
+dependencies = ["pytorch", "numpy"]
+
+[project.urls]
+Homepage = "https://github.com/indigoviolet/pytorch-memory-utils"
+
+[tool.hatch.version]
+path = "src/pytorch_memory_utils/__about__.py"
+
+[tool.hatch.envs.default]
+path = ".venv"
+
+[tool.hatch.build]
+packages = ["src/pytorch_memory_utils/"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
