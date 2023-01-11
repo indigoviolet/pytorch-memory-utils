@@ -141,11 +141,11 @@ class MemTracker:
             }
             for t, s, n, m, data_type in new_tensor_sizes - self.last_tensor_sizes:
                 self.log_fn(
-                    f"+ | {str(n)} * Shape:{str(s):<20} | Memory: {self._mformat(m*n)}  | {str(t):<20} | {data_type}\n"
+                    f"+ | {str(n)} * Shape:{str(s):<20} | Memory: {self._mformat(m*n)}  | {str(t):<20} | {data_type}"
                 )
             for t, s, n, m, data_type in self.last_tensor_sizes - new_tensor_sizes:
                 self.log_fn(
-                    f"- | {str(n)} * Shape:{str(s):<20} | Memory: {self._mformat(m*n)}  | {str(t):<20} | {data_type}\n"
+                    f"- | {str(n)} * Shape:{str(s):<20} | Memory: {self._mformat(m*n)}  | {str(t):<20} | {data_type}"
                 )
 
             self.last_tensor_sizes = new_tensor_sizes
