@@ -1,4 +1,7 @@
 
+* 0.0.2
+
+- cleanups, move to logger, humanize
 
 * 0.0.1
 

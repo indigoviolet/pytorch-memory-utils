@@ -14,7 +14,7 @@ keywords = [
 classifiers = [
             'Intended Audience :: Science/Research',
             ]
-dependencies = ["torch", "numpy"]
+dependencies = ["torch", "numpy", "humanize", "loguru"]
 
 [project.urls]
 Homepage = "https://github.com/indigoviolet/pytorch-memory-utils"

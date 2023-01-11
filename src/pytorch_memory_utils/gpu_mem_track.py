@@ -1,10 +1,14 @@
 import datetime
 import gc
 import inspect
+from dataclasses import dataclass, field
+from typing import Callable
+
+import humanize
 
 import numpy as np
-
 import torch
+from loguru import logger
 
 dtype_memory_size_dict = {
     torch.float64: 64 / 8,
@@ -36,9 +40,11 @@ def get_mem_space(x):
         return dtype_memory_size_dict[x]
     except KeyError:
         print(f"dtype {x} is not supported!")
+        raise
 
 
-class MemTracker(object):
+@dataclass
+class MemTracker:
     """
     Class used to track pytorch memory usage
     Arguments:
@@ -48,15 +54,12 @@ class MemTracker(object):
         device(int): GPU number, default is 0
     """
 
-    def __init__(self, detail=True, path="", verbose=False, device=0):
-        self.print_detail = detail
-        self.last_tensor_sizes = set()
-        self.gpu_profile_fn = (
-            path + f"{datetime.datetime.now():%d-%b-%y-%H:%M:%S}-gpu_mem_track.txt"
-        )
-        self.verbose = verbose
-        self.begin = True
-        self.device = device
+    log_fn: Callable[[str], None] = logger.info
+    print_detail = True
+    verbose = False
+    device: torch.device = torch.device("cuda:0")
+    begin: bool = field(init=False, default=True)
+    last_tensor_sizes: set = field(init=False, default_factory=set)
 
     def get_tensors(self):
         for obj in gc.get_objects():
@@ -78,76 +81,73 @@ class MemTracker(object):
             np.prod(np.array(tensor.size())) * get_mem_space(tensor.dtype)
             for tensor in self.get_tensors()
         ]
-        return np.sum(sizes) / 1024**2
+        return self._mformat(np.sum(sizes))
 
     def get_allocate_usage(self):
-        return torch.cuda.memory_allocated() / 1024**2
+        return self._mformat(torch.cuda.memory_allocated())
+
+    def get_reserved_usage(self):
+        return f"{self._mformat(torch.cuda.memory_reserved())} max={self._mformat(torch.cuda.max_memory_reserved())}"
+
+    def _mformat(self, x):
+        return humanize.naturalsize(x, binary=True)
 
     def clear_cache(self):
         gc.collect()
         torch.cuda.empty_cache()
 
-    def print_all_gpu_tensor(self, file=None):
+    def all_gpu_tensors_info(self):
         for x in self.get_tensors():
-            print(
+            yield (
                 x.size(),
                 x.dtype,
-                np.prod(np.array(x.size())) * get_mem_space(x.dtype) / 1024**2,
-                file=file,
+                self._mformat(np.prod(np.array(x.size())) * get_mem_space(x.dtype)),
             )
 
-    def track(self):
+    def _log_summary(self):
+        self.log_fn(
+            f"Tensor:{self.get_tensor_usage()} | Allocated:{self.get_allocate_usage()} | Reserved:{self.get_reserved_usage()}"
+        )
+
+    def _log_delimiter(self, notes: str = ""):
+        frameinfo = inspect.stack()[2]
+        where_str = (
+            f"{frameinfo.filename} line {str(frameinfo.lineno)}: {frameinfo.function}"
+        )
+        self.log_fn(f"\n========== At {where_str:<50} [{notes}]")
+
+    def track(self, notes: str = ""):
         """
         Track the GPU memory usage
         """
-        frameinfo = inspect.stack()[1]
-        where_str = (
-            frameinfo.filename
-            + " line "
-            + str(frameinfo.lineno)
-            + ": "
-            + frameinfo.function
-        )
 
-        with open(self.gpu_profile_fn, "a+") as f:
+        self._log_delimiter(notes)
 
-            if self.begin:
-                f.write(
-                    f"GPU Memory Track | {datetime.datetime.now():%d-%b-%y-%H:%M:%S} |"
-                    f" Total Tensor Used Memory:{self.get_tensor_usage():<7.1f}Mb"
-                    f" Total Allocated Memory:{self.get_allocate_usage():<7.1f}Mb\n\n"
+        if self.begin:
+            self._log_summary()
+            self.begin = False
+
+        if self.print_detail is True:
+            ts_list = [(tensor.size(), tensor.dtype) for tensor in self.get_tensors()]
+            new_tensor_sizes = {
+                (
+                    type(x),
+                    tuple(x.size()),
+                    ts_list.count((x.size(), x.dtype)),
+                    self._mformat(np.prod(np.array(x.size())) * get_mem_space(x.dtype)),
+                    x.dtype,
                 )
-                self.begin = False
+                for x in self.get_tensors()
+            }
+            for t, s, n, m, data_type in new_tensor_sizes - self.last_tensor_sizes:
+                self.log_fn(
+                    f"+ | {str(n)} * Shape:{str(s):<20} | Memory: {self._mformat(m*n)}  | {str(t):<20} | {data_type}\n"
+                )
+            for t, s, n, m, data_type in self.last_tensor_sizes - new_tensor_sizes:
+                self.log_fn(
+                    f"- | {str(n)} * Shape:{str(s):<20} | Memory: {self._mformat(m*n)}  | {str(t):<20} | {data_type}\n"
+                )
 
-            if self.print_detail is True:
-                ts_list = [
-                    (tensor.size(), tensor.dtype) for tensor in self.get_tensors()
-                ]
-                new_tensor_sizes = {
-                    (
-                        type(x),
-                        tuple(x.size()),
-                        ts_list.count((x.size(), x.dtype)),
-                        np.prod(np.array(x.size()))
-                        * get_mem_space(x.dtype)
-                        / 1024**2,
-                        x.dtype,
-                    )
-                    for x in self.get_tensors()
-                }
-                for t, s, n, m, data_type in new_tensor_sizes - self.last_tensor_sizes:
-                    f.write(
-                        f"+ | {str(n)} * Size:{str(s):<20} | Memory: {str(m*n)[:6]} M | {str(t):<20} | {data_type}\n"
-                    )
-                for t, s, n, m, data_type in self.last_tensor_sizes - new_tensor_sizes:
-                    f.write(
-                        f"- | {str(n)} * Size:{str(s):<20} | Memory: {str(m*n)[:6]} M | {str(t):<20} | {data_type}\n"
-                    )
+            self.last_tensor_sizes = new_tensor_sizes
 
-                self.last_tensor_sizes = new_tensor_sizes
-
-            f.write(
-                f"\nAt {where_str:<50}"
-                f" Total Tensor Used Memory:{self.get_tensor_usage():<7.1f}Mb"
-                f" Total Allocated Memory:{self.get_allocate_usage():<7.1f}Mb\n\n"
-            )
+        self._log_summary()
